@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile.dhclient
     networks:
-      kea_testing:
+      kea:
         ipv4_address: 172.31.255.129
 
   dhclient2:
@@ -16,7 +16,7 @@ services:
       context: .
       dockerfile: Dockerfile.dhclient
     networks:
-      kea_testing:
+      kea:
         ipv4_address: 172.31.255.130
 
   dhclient3:
@@ -26,7 +26,7 @@ services:
       context: .
       dockerfile: Dockerfile.dhclient
     networks:
-      kea_testing:
+      kea:
         ipv4_address: 172.31.255.131
 
   dhclient4:
@@ -36,7 +36,7 @@ services:
       context: .
       dockerfile: Dockerfile.dhclient
     networks:
-      kea_testing:
+      kea:
         ipv4_address: 172.31.255.132
 
   dhclient5:
@@ -46,7 +46,7 @@ services:
       context: .
       dockerfile: Dockerfile.dhclient
     networks:
-      kea_testing:
+      kea:
         ipv4_address: 172.31.255.133
 
   kea:
@@ -56,11 +56,11 @@ services:
       context: .
       dockerfile: Dockerfile.keadhcp4
     networks:
-      kea_testing:
+      kea:
         ipv4_address: 172.31.255.134
 
 networks:
-  kea_testing:
+  kea:
     driver: bridge
     ipam:
       config:

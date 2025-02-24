@@ -1,10 +1,12 @@
 #!/bin/sh
-if ! test -e /etc/kea-dhcp4.conf; then
-    mkdir -p /etc/kea
-    # Docker doesn't have a consistent way of a-priori finding the name of created link interfaces,
-    # so we must do it after link interfaces have been created (?) 
-    iface="$(ip -o -4 route show to "172.31.255.0/24" | cut -d' ' -f3 -)"
-    cat <<EOF > /etc/kea/kea-dhcp4.conf
+
+# Docker doesn't have a consistent way of a-priori finding the name of created link interfaces,
+# so we must do it after link interfaces have been created (?), and then afterwards we can create 
+# the kea-dhcp4 config file
+iface="$(ip -o -4 route show to "172.31.255.0/24" | cut -d' ' -f3 -)"
+
+mkdir -p /etc/kea
+cat <<EOF > /etc/kea/kea-dhcp4.conf
 {
     "Dhcp4": {
         "subnet4": [
@@ -50,10 +52,5 @@ if ! test -e /etc/kea-dhcp4.conf; then
     }
 }
 EOF
-fi 
 
-if test -f /etc/kea/kea-dhcp4.conf; then
-    exec /usr/sbin/kea-dhcp4 -c /etc/kea/kea-dhcp4.conf
-else
-    exit 1
-fi
+exec /usr/sbin/kea-dhcp4 -c /etc/kea/kea-dhcp4.conf

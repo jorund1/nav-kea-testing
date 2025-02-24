@@ -16,10 +16,10 @@ COPY etc/supervisor-kea-agent.conf /etc/supervisor/conf.d/kea-agent.conf
 
 # Copy Kea configs
 COPY etc/kea-ctrl-agent.conf /etc/kea/kea-ctrl-agent.conf
-COPY etc/kea-dhcp4.conf /etc/kea/kea-dhcp4.conf
 
 # Copy bin scripts
 COPY bin/lease4-wipe /bin/lease4-wipe
+COPY bin/start-kea-dhcp4 /bin/start-kea-dhcp4
 
 CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 HEALTHCHECK CMD [ "supervisorctl", "status" ]
