@@ -1,50 +1,50 @@
 services:
-  dhclient1:
+  client1:
     tty: true
     stdin_open: true
     build:
       context: .
-      dockerfile: Dockerfile.dhclient
+      dockerfile: Dockerfile.client
     networks:
       kea:
         ipv4_address: 172.31.255.129
 
-  dhclient2:
+  client2:
     tty: true
     stdin_open: true
     build:
       context: .
-      dockerfile: Dockerfile.dhclient
+      dockerfile: Dockerfile.client
     networks:
       kea:
         ipv4_address: 172.31.255.130
 
-  dhclient3:
+  client3:
     tty: true
     stdin_open: true
     build:
       context: .
-      dockerfile: Dockerfile.dhclient
+      dockerfile: Dockerfile.client
     networks:
       kea:
         ipv4_address: 172.31.255.131
 
-  dhclient4:
+  client4:
     tty: true
     stdin_open: true
     build:
       context: .
-      dockerfile: Dockerfile.dhclient
+      dockerfile: Dockerfile.client
     networks:
       kea:
         ipv4_address: 172.31.255.132
 
-  dhclient5:
+  client5:
     tty: true
     stdin_open: true
     build:
       context: .
-      dockerfile: Dockerfile.dhclient
+      dockerfile: Dockerfile.client
     networks:
       kea:
         ipv4_address: 172.31.255.133
@@ -54,7 +54,7 @@ services:
     stdin_open: true
     build:
       context: .
-      dockerfile: Dockerfile.keadhcp4
+      dockerfile: Dockerfile.kea
     networks:
       kea:
         ipv4_address: 172.31.255.134

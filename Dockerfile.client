@@ -9,7 +9,7 @@ RUN apk update && \
 COPY etc/supervisord.conf /etc/supervisor/supervisord.conf
 
 # Copy bin scripts
-COPY bin/dora /bin/dora
+COPY bin/dhcpcd-run /bin/dhcpcd-run
 
 CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 HEALTHCHECK CMD [ "supervisorctl", "status" ]
