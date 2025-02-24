@@ -58,6 +58,7 @@ services:
     networks:
       kea:
         ipv4_address: 172.31.255.134
+      nav:
 
 networks:
   kea:
@@ -67,5 +68,5 @@ networks:
         - subnet: 172.31.255.0/24
           ip_range: 172.31.255.128/25
   nav:
-	external: true
-	name: "${NAV_NETWORK:-nav_default}"
+    external: true
+    name: "${NAV_NETWORK:-nav_default}"
