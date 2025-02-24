@@ -1,0 +1,3 @@
+#!/bin/sh
+# Script to include in dhclient container for requesting and acquiring a dynamic address (from kea-dhcp4 container)
+dhcpcd --nohook --noarp --nobackground --nogateway --noconfigure --oneshot --nodev

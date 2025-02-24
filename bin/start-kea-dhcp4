@@ -1,0 +1,59 @@
+#!/bin/sh
+if ! test -e /etc/kea-dhcp4.conf; then
+    mkdir -p /etc/kea
+    # Docker doesn't have a consistent way of a-priori finding the name of created link interfaces,
+    # so we must do it after link interfaces have been created (?) 
+    iface="$(ip -o -4 route show to "172.31.255.0/24" | cut -d' ' -f3 -)"
+    cat <<EOF > /etc/kea/kea-dhcp4.conf
+{
+    "Dhcp4": {
+        "subnet4": [
+            {
+                "subnet":  "172.31.255.0/24",
+                "pools": [
+                    {
+                        "pool": "172.31.255.0/25"
+                    }
+                ],
+                "id": 1,
+                "interface": "$iface"
+            }
+        ],
+        "interfaces-config": {
+            "interfaces": [
+                "$iface"
+            ],
+            "service-sockets-max-retries": 5,
+            "service-sockets-require-all": true
+        },
+        "control-socket": {
+            "socket-type": "unix",
+            "socket-name": "/run/kea/control_socket_4"
+        },
+        "renew-timer": 1000,
+        "rebind-timer": 2000,
+        "valid-lifetime": 4000,
+        "loggers": [
+            {
+                "name": "kea-dhcp4",
+                "output_options": [
+                    {
+                        "output": "stdout"
+                    }
+                ],
+                "severity": "INFO"
+            }
+        ],
+        "lease-database": {
+            "type": "memfile"
+        }
+    }
+}
+EOF
+fi 
+
+if test -f /etc/kea/kea-dhcp4.conf; then
+    exec /usr/sbin/kea-dhcp4 -c /etc/kea/kea-dhcp4.conf
+else
+    exit 1
+fi
