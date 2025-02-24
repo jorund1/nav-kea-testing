@@ -1,0 +1,5 @@
+#!/bin/sh
+# Script to include in kea-dhcp4 container for wiping lease database
+supervisorctl "stop all"
+rm /var/lib/kea/kea-leases4.csv
+supervisorctl "start all"

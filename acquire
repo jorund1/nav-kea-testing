@@ -1,6 +1,6 @@
 #!/bin/sh
 if { test "$1" -ge 1 && test "$1" -le 5; } 2>/dev/null; then
-    sudo docker compose exec kea lease4-wipe || exit 1
+    sudo docker compose exec kea clear-leases || exit 1
     for i in $(seq 1 "$1"); do
         sudo docker compose exec "client$i" dhcpcd-run || exit 1
     done

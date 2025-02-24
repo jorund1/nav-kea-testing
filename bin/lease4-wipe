@@ -1,3 +1,0 @@
-#!/bin/sh
-# Script to include in kea-dhcp4 container for wiping lease database
-echo '{"command": "lease4-wipe", "arguments": {"subnet-id": 0}}' | socat UNIX:/run/kea/control_socket_4 -,ignoreeof
