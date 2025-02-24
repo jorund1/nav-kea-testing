@@ -1,0 +1,22 @@
+# Based on official dockerfile: https://gitlab.isc.org/isc-projects/kea-docker/-/blob/91878c8249ab7f4f14519c35058f95540c4d08e3/kea-dhcp4/Dockerfile
+ 
+FROM alpine:3.21
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+RUN apk update && \
+    apk add --no-cache kea-dhcp4 kea-ctrl-agent socat supervisor && \
+    mkdir -p /var/log/supervisor && \
+    mkdir -p /run/kea && \
+    mkdir -p /usr/local/var/run/kea
+
+
+# Copy supervisor configs
+COPY etc/supervisord.conf /etc/supervisor/supervisord.conf
+COPY etc/supervisor-kea-dhcp4.conf /etc/supervisor/conf.d/kea-dhcp4.conf
+COPY etc/supervisor-kea-agent.conf /etc/supervisor/conf.d/kea-agent.conf
+
+# Copy Kea configs
+COPY etc/kea-ctrl-agent.conf /etc/kea/kea-ctrl-agent.conf
+COPY etc/kea-dhcp4.conf /etc/kea/kea-dhcp4.conf
+
+CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+HEALTHCHECK CMD [ "supervisorctl", "status" ]

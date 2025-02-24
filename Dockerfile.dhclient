@@ -1,0 +1,12 @@
+FROM alpine:3.21
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+RUN apk update && \
+    apk add --no-cache dhcpcd supervisor && \
+    mkdir -p /var/log/supervisor && \
+    mkdir -p /run
+
+# Copy supervisor configs
+COPY etc/supervisord.conf /etc/supervisor/supervisord.conf
+
+CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+HEALTHCHECK CMD [ "supervisorctl", "status" ]

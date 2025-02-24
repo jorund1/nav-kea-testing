@@ -1,0 +1,68 @@
+services:
+  dhclient1:
+    tty: true
+    stdin_open: true
+    build:
+      context: .
+      dockerfile: Dockerfile.dhclient
+    networks:
+      kea_testing:
+        ipv4_address: 172.31.255.129
+
+  dhclient2:
+    tty: true
+    stdin_open: true
+    build:
+      context: .
+      dockerfile: Dockerfile.dhclient
+    networks:
+      kea_testing:
+        ipv4_address: 172.31.255.130
+
+  dhclient3:
+    tty: true
+    stdin_open: true
+    build:
+      context: .
+      dockerfile: Dockerfile.dhclient
+    networks:
+      kea_testing:
+        ipv4_address: 172.31.255.131
+
+  dhclient4:
+    tty: true
+    stdin_open: true
+    build:
+      context: .
+      dockerfile: Dockerfile.dhclient
+    networks:
+      kea_testing:
+        ipv4_address: 172.31.255.132
+
+  dhclient5:
+    tty: true
+    stdin_open: true
+    build:
+      context: .
+      dockerfile: Dockerfile.dhclient
+    networks:
+      kea_testing:
+        ipv4_address: 172.31.255.133
+
+  kea:
+    tty: true
+    stdin_open: true
+    build:
+      context: .
+      dockerfile: Dockerfile.keadhcp4
+    networks:
+      kea_testing:
+        ipv4_address: 172.31.255.134
+
+networks:
+  kea_testing:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.255.0/24
+          ip_range: 172.31.255.128/25
