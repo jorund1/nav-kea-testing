@@ -66,3 +66,6 @@ networks:
       config:
         - subnet: 172.31.255.0/24
           ip_range: 172.31.255.128/25
+  nav:
+	external: true
+	name: "${NAV_NETWORK:-nav_default}"

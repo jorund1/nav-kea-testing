@@ -23,7 +23,7 @@ docker compose up -d
 
 [^1]: We will connect the Kea server to the NAV network, so NAV containers must go up first. We assume the NAV network is called 'nav_default'. This is the default case when the NAV repository's root directory is called 'nav' (the default name when cloning the NAV repository).
 If this is the case for you, continue on. However, if your local NAV repository's root directory is not called 'nav',
-then change all occurrences of the string 'nav_default' in this very (nav-kea-testing) repository's 'docker-compose.yaml' file to '\<dir>_default', where \<dir>
+then set the environment variable NAV_NETWORK to '*dir*_default', where *dir*
 is the name of your NAV repository's root directory *before* applying this step to make sure that the Kea server is connected to the correct NAV network.
 
 
@@ -38,7 +38,7 @@ docker compose up -d
             # have between 1 and 5 dhcp clients acquire an address
 ```
 
-Now NAV should be able to reach the Kea API at `http://kea:8000/`. To test NAV's this, add the following entry to
+Now NAV should be able to reach the Kea API at `http://kea:8000/`. To test this, add the following entry to
 the `dhcpmetrics.conf` NAV configuration file[^2]:
 
 [^2]: for example by editing it in the NAV source tree under `python/nav/etc/dhcpmetrics.conf`and then running `docker compose exec nav nav config install --overwrite /etc/nav`
