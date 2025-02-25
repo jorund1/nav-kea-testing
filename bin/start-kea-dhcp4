@@ -1,3 +1,14 @@
+#!/bin/sh
+
+# We need kea-dhcp4 to only serve the kea network (not the nav network). So we need to configure
+# it to only use the kea link interface.
+# Docker doesn't seem to have a way of a-priori knowing the name of link interfaces that the runtime
+# creates, so we must find out after link interfaces have been created, and then afterwards we can
+# create the kea-dhcp4 config file.
+iface="$(ip -o -4 route show to "172.31.255.0/24" | cut -d' ' -f3 -)"
+
+mkdir -p /etc/kea
+cat <<EOF > /etc/kea/kea-dhcp4.conf
 {
     "Dhcp4": {
         "subnet4": [
@@ -9,12 +20,12 @@
                     }
                 ],
                 "id": 1,
-                "interface": "eth0"
+                "interface": "$iface"
             }
         ],
         "interfaces-config": {
             "interfaces": [
-                "eth0"
+                "$iface"
             ],
             "service-sockets-max-retries": 5,
             "service-sockets-require-all": true
@@ -43,3 +54,6 @@
         }
     }
 }
+EOF
+
+exec /usr/sbin/kea-dhcp4 -c /etc/kea/kea-dhcp4.conf
