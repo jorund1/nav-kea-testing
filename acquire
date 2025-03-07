@@ -7,32 +7,47 @@ Make NAV collect \$1 assigned addresses at t, \$2 assigned addresses at t+5min, 
 " >&2
 }
 
-acquire() {
+
+reset-dhcp() {
+    # Reset lease table of DHCP server and then acquire $1 leases
 	sudo docker compose exec kea clear-leases || exit 1
 	for i in $(seq 1 "$1"); do
 		sudo docker compose exec "client$i" dhcpcd-run || exit 1
 	done
 }
 
-collect() {
-	sudo docker compose exec nav dhcpmetrics --timeoffset="$1" || exit 1
+
+collect-dhcp() {
+    # Make NAV collect metrics from DHCP server
+	sudo docker compose exec nav dhcpmetrics "$1" || exit 1
 }
 
-timed() {
-	out="$(LC_NUMERIC="en_US.UTF-8" time -p "$@" 2>&1 >/dev/null)"
-	echo "$out" | head -n1 | cut -d" " -f2 | cut -d"." -f1
+timestamp() {
+    # https://unix.stackexchange.com/questions/703141/whats-the-posix-compliant-way-to-get-the-epoch-timestamp-in-a-shell
+    echo $((`TZ=GMT0 date \
++"((%Y-1600)*365+(%Y-1600)/4-(%Y-1600)/100+(%Y-1600)/400+1%j-1000-135140)\
+*86400+(1%H-100)*3600+(1%M-100)*60+(1%S-100)"`))
 }
 
-for i in $(seq 1 "$#"); do
-	if ! { test "$1" -ge 1 && test "$1" -le 5; } 2>/dev/null; then
+
+if test "$#" -eq 0; then
+    help
+    exit 1
+fi
+
+for arg in "$@"; do
+	if ! { test "$arg" -ge 1 && test "$arg" -le 5; } 2>/dev/null; then
 		help
+        exit 1
 	fi
 done
 
 timeoffset=0
 while test "$#" -gt 0; do
-	timespent1=$(timed acquire "$1")
-	timespent2=$(timed collect "$timeoffset")
-	timeoffset=$((timeoffset + 300 - timespent1 - timespent2))
+    start="$(timestamp)"
+	reset-dhcp "$1"
+	collect-dhcp "$timeoffset"
+    end="$(timestamp)"
+	timeoffset=$((timeoffset + 300 + start - end))
 	shift 1
 done
