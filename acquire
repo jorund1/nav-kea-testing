@@ -8,7 +8,7 @@ Make NAV collect \$1 assigned addresses at t, \$2 assigned addresses at t+5min, 
 }
 
 
-reset-dhcp() {
+reset_dhcp() {
     # Reset lease table of DHCP server and then acquire $1 leases
 	sudo docker compose exec kea clear-leases || exit 1
 	for i in $(seq 1 "$1"); do
@@ -17,7 +17,7 @@ reset-dhcp() {
 }
 
 
-collect-dhcp() {
+collect_dhcp() {
     # Make NAV collect metrics from DHCP server
 	sudo docker compose exec nav dhcpmetrics "$1" || exit 1
 }
@@ -45,8 +45,8 @@ done
 timeoffset=0
 while test "$#" -gt 0; do
     start="$(timestamp)"
-	reset-dhcp "$1"
-	collect-dhcp "$timeoffset"
+	reset_dhcp "$1"
+	collect_dhcp "$timeoffset"
     end="$(timestamp)"
 	timeoffset=$((timeoffset + 300 + start - end))
 	shift 1
