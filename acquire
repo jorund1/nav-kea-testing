@@ -3,7 +3,9 @@
 help() {
 	echo "\
 Usage: $0 {1, 2, ..., 5}...
-Make NAV collect \$1 assigned addresses at t, \$2 assigned addresses at t+5min, ..., \$N+1 assigned addresses at t+5Nmin
+Make NAV collect \$1 assigned addresses with timestamp t, \$2 assigned addresses
+with timestamp t+5min, \$3 assigned addresses with timestamp t+10min, ..., where
+t is the current time and \$N denotes the Nth positional argument.\
 " >&2
 }
 
@@ -22,11 +24,12 @@ collect_dhcp() {
 	sudo docker compose exec nav dhcpmetrics "$1" || exit 1
 }
 
+
 timestamp() {
     # https://unix.stackexchange.com/questions/703141/whats-the-posix-compliant-way-to-get-the-epoch-timestamp-in-a-shell
-    echo $((`TZ=GMT0 date \
+    echo $(($(TZ=GMT0 date \
 +"((%Y-1600)*365+(%Y-1600)/4-(%Y-1600)/100+(%Y-1600)/400+1%j-1000-135140)\
-*86400+(1%H-100)*3600+(1%M-100)*60+(1%S-100)"`))
+*86400+(1%H-100)*3600+(1%M-100)*60+(1%S-100)")))
 }
 
 
