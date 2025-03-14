@@ -21,7 +21,7 @@ reset_dhcp() {
 
 collect_dhcp() {
     # Make NAV collect metrics from DHCP server
-	sudo docker compose exec nav dhcpmetrics "$1" || exit 1
+	sudo docker compose exec sh -c "TZ=\"$tz\" nav dhcpmetrics" || exit 1
 }
 
 
@@ -46,11 +46,16 @@ for arg in "$@"; do
 done
 
 timeoffset=0
+tz="CUSTOM+00:00:00"
 while test "$#" -gt 0; do
     start="$(timestamp)"
 	reset_dhcp "$1"
-	collect_dhcp "$timeoffset"
+	collect_dhcp
     end="$(timestamp)"
 	timeoffset=$((timeoffset + 300 + start - end))
+	hours=$((timeoffset / 3600))
+	minutes=$((timeoffset % 3600 / 60))
+	seconds=$((timeoffset % 60))
+	tz="CUSTOM+$hours:$minutes:$seconds"
 	shift 1
 done
