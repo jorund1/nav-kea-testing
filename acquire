@@ -1,7 +1,7 @@
 #!/bin/sh
 
 help() {
-	echo "\
+    echo "\
 Usage: $0 {1, 2, ..., 5}...
 Make NAV collect \$1 assigned addresses with timestamp t, \$2 assigned addresses
 with timestamp t+5min, \$3 assigned addresses with timestamp t+10min, ..., where
@@ -12,16 +12,16 @@ t is the current time and \$N denotes the Nth positional argument.\
 
 reset_dhcp() {
     # Reset lease table of DHCP server and then acquire $1 leases
-	sudo docker compose exec kea clear-leases || exit 1
-	for i in $(seq 1 "$1"); do
-		sudo docker compose exec "client$i" dhcpcd-run || exit 1
-	done
+    sudo docker compose exec kea clear-leases || exit 1
+    for i in $(seq 1 "$1"); do
+        sudo docker compose exec "client$i" dhcpcd-run || exit 1
+    done
 }
 
 
 collect_dhcp() {
     # Make NAV collect metrics from DHCP server
-	sudo docker compose exec sh -c "TZ=\"$tz\" nav dhcpmetrics" || exit 1
+    sudo docker compose exec sh -c "TZ=\"$tz\" nav dhcpmetrics" || exit 1
 }
 
 
@@ -39,23 +39,23 @@ if test "$#" -eq 0; then
 fi
 
 for arg in "$@"; do
-	if ! { test "$arg" -ge 1 && test "$arg" -le 5; } 2>/dev/null; then
-		help
+    if ! { test "$arg" -ge 1 && test "$arg" -le 5; } 2>/dev/null; then
+        help
         exit 1
-	fi
+    fi
 done
 
 timeoffset=0
 tz="CUSTOM+00:00:00"
 while test "$#" -gt 0; do
     start="$(timestamp)"
-	reset_dhcp "$1"
-	collect_dhcp
+    reset_dhcp "$1"
+    collect_dhcp
     end="$(timestamp)"
-	timeoffset=$((timeoffset + 300 + start - end))
-	hours=$((timeoffset / 3600))
-	minutes=$((timeoffset % 3600 / 60))
-	seconds=$((timeoffset % 60))
-	tz="CUSTOM+$hours:$minutes:$seconds"
-	shift 1
+    timeoffset=$((timeoffset + 300 + start - end))
+    hours=$((timeoffset / 3600))
+    minutes=$((timeoffset % 3600 / 60))
+    seconds=$((timeoffset % 60))
+    tz="CUSTOM+$hours:$minutes:$seconds"
+    shift 1
 done
