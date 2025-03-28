@@ -5,82 +5,93 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
-	"flag"
+	"errors"
 	"log"
-	"net"
+	"math"
 	"math/rand"
+	"net"
+	"sort"
 	"time"
 
 	"golang.org/x/net/ipv4"
 	"golang.org/x/sys/unix"
 )
 
-var magicCookie = [4]byte{99, 130, 83, 99}
-
-// DHCPv4 represents a DHCPv4 packet header and options. See the New* functions
-// to build DHCPv4 packets.
+// All parts of the DHCPv4 packet we use
 type DHCPv4 struct {
 	OpCode         uint8
 	HWType         uint16
-	HopCount       uint8
-	TransactionID  [4]byte
-	NumSeconds     uint16
-	Flags          uint16
-	ClientIPAddr   net.IP
-	YourIPAddr     net.IP
-	ServerIPAddr   net.IP
-	GatewayIPAddr  net.IP
+	TransactionID  uint32
 	ClientHWAddr   net.HardwareAddr
-	ServerHostName string
-	BootFileName   string
-	Options        map[uint8][]byte
+	Options        map[uint8][]uint8
 }
 
-// DHCP ports
+
+var (
+	// Addresses we use
+	ServerIP = net.IPv4bcast
+	ClientIP = net.IPv4zero
+
+	// DHCPv4 magic cookie
+	magicCookie = [4]uint8{99, 130, 83, 99}
+)
+
+
 const (
+	// DHCP ports
 	ServerPort = 67
 	ClientPort = 68
-)
 
-// DHCP options
-const (
-	OptionDomainName uint8 = 15
-	OptionDHCPMessageType uint8 = 53
-	OptionParameterRequestList uint8 = 55
-	OptionEnd uint8 = 255
-)
+	// IPv4 UDP protocol identifier
+	ProtocolUDP = 17
 
-// DHCP message types
-const (
-	MessageTypeNone     byte = 0
-	MessageTypeDiscover byte = 1
-	MessageTypeOffer    byte = 2
-	MessageTypeRequest  byte = 3
-	MessageTypeDecline  byte = 4
-	MessageTypeAck      byte = 5
-	MessageTypeNak      byte = 6
-	MessageTypeRelease  byte = 7
-	MessageTypeInform   byte = 8
-)
+	// Arbitrary maximum supported UDP packet size, same as that in insomniacslk/dhcp
+	MaxUDPReceivedPacketSize = 8192
 
-const (
+	// Minimum length of BOOTP packet
+	MinBootpLen = 300
+
+	// DHCP message types we use
+	MessageTypeNone uint8 = 0
+	MessageTypeDiscover uint8 = 1
+	MessageTypeOffer uint8 = 2
+	MessageTypeRequest uint8 = 3
+	MessageTypeDecline uint8 = 4
+	MessageTypeAck uint8 = 5
+	MessageTypeNak uint8 = 6
+	MessageTypeRelease uint8 = 7
+	MessageTypeInform uint8 = 8
+
+	// DHCP hardware types we use
 	HWTypeEthernet = 1
-)
 
-const (
+	// DHCP options we use
+	OptionPad uint8 = 0
+	OptionDomainName uint8 = 15 //
+	OptionDHCPMessageType uint8 = 53 // Marks start of DHCP message type singleton
+	OptionParameterRequestList uint8 = 55 // Marks start of list of requested DHCP params
+	OptionAgentInfo uint8 = 82 // Not directly used but has special rules
+	OptionEnd uint8 = 255 // Always the last option
+
+	// Message type
 	OpcodeBootRequest uint8 = 1
-)
+	OpcodeBootReply uint8 = 2
 
-const NoHops = 0
-const NoSecs = 0
-const NoFlags = 0
+	// Zero constants used for clarity
+	NoHops = 0
+	NoSecs = 0
+	NoFlags = 0
+	NoAddr = 0
+	NoChecksum = 0
+
+	// Implementation defaults
+	NetworkTimeout = 3 * time.Second
+)
 
 
 func dora(ifname string) error {
-	raddr := &net.UDPAddr{IP: net.IPv4bcast, Port: ServerPort}
-	laddr := &net.UDPAddr{IP: net.IPv4zero, Port: ClientPort}
-
 	// Make send socket
 	sfd, err := unix.Socket(unix.AF_INET, unix.SOCK_RAW, unix.IPPROTO_RAW) // Raw IP packets
 	if err != nil {
@@ -133,38 +144,237 @@ func dora(ifname string) error {
 		}
 	}()
 
-	// Discover
-	minPacketLen := 200
-	buf := make([]byte, 0, minPacketLen)
-	buf.Write8(uint8(OpcodeBootRequest))
-	buf.Write8(uint8(HWTypeEthernet))
-	buf.Write8(uint8(len(iface.HardwareAddr)))
-	buf.Write8(NoHops)
-	buf.Write32(rand.Uint32())
-	buf.Write16(NoSecs)
-	buf.Write16(NoFlags)
-	buf.Write32(0)
-	buf.Write32(0)
-	buf.Write32(0)
-	buf.Write32(0)
-	copy(buf.WriteN(16), iface.HardwareAddr)
-	buf.WriteN(64)
-	buf.WriteN(128)
-	buf.WriteBytes(magicCookie[:])
-	buf.Write8(uint8(OptionDHCPMessageType))
-	buf.Write8(uint8(1))
-	buf.Write8(MessageTypeDiscover)
-	buf.Write8(uint8(OptionParameterRequestList))
-	buf.Write8(uint8(2))
-	buf.Write8(uint8(OptionDomainName))
-	buf.Write8(uint8(OptionDHCPMessageType))
-	buf.Write8(uint8(OptionEnd))
+	transactionID := rand.Uint32()
+
+	// Make discovery payload
+	discovery := DHCPv4{
+		OpCode: OpcodeBootRequest,
+		HWType: HWTypeEthernet,
+		TransactionID: transactionID,
+		ClientHWAddr: iface.HardwareAddr,
+		Options: map[uint8][]uint8{
+			OptionDHCPMessageType: []uint8{MessageTypeDiscover},
+			OptionParameterRequestList: []uint8{OptionDomainName},
+			OptionEnd: []uint8{},
+		},
+	}
+
+	offer, err := send(sfd, rfd, &discovery, MessageTypeDiscover)
+	if err != nil {
+		return err
+	}
+
+	// Make request payload
+	request := DHCPv4{
+		OpCode: OpcodeBootRequest,
+		HWType: HWTypeEthernet,
+		TransactionID: transactionID,
+		ClientHWAddr: iface.HardwareAddr,
+		Options: map[uint8][]uint8{
+
+		},
+	}
+
+	acknowledge, err := send(sfd, rfd, &request, MessageTypeRequest)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
+
+func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
+	udpdata := dhcp4.Marshal()
+	udpheader := make([]uint8, 8)
+	binary.BigEndian.PutUint16(udpheader[:2], uint16(ClientPort))
+	binary.BigEndian.PutUint16(udpheader[2:4], uint16(ServerPort))
+	binary.BigEndian.PutUint16(udpheader[4:6], uint16(8+len(udpdata)))
+	binary.BigEndian.PutUint16(udpheader[6:8], uint16(NoChecksum))
+
+	h := ipv4.Header{
+		Version:  4,
+		Len:      20,
+		TotalLen: 20 + len(udpheader) + len(udpdata),
+		TTL:      64,
+		Protocol: ProtocolUDP,
+		Dst:      ServerIP,
+		Src:      ClientIP,
+	}
+	datagram, err := h.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	datagram = append(datagram, udpheader)
+	datagram = append(datagram, udpdata)
+
+	var (
+		destination [net.IPv4len]uint8
+		response *DHCPv4
+	)
+	copy(destination[:], raddr.IP.To4())
+	remoteAddr := unix.SockaddrInet4{Port: ClientPort, Addr: destination}
+	recvErrors := make(chan error, 1)
+	go func(errs chan<- error) {
+		timeout := unix.NsecToTimeval(NetworkTimeout.Nanoseconds())
+		err := unix.SetsockoptTimeval(recvFd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &timeout)
+		if err != nil {
+			errs <- err
+			return
+		}
+		for {
+			buf := make([]uint8, MaxUDPReceivedPacketSize)
+			n, _, innerErr := unix.Recvfrom(rfd, buf, 0)
+			if innerErr != nil {
+				errs <- innerErr
+				return
+			}
+			var iph ipv4.Header
+			err := iph.Parse(buf[:n])
+			if err != nil {
+				continue
+			}
+			if iph.Protocol != ProtocolUDP {
+				continue
+			}
+			udph := buf[iph.Len:n]
+			srcPort := int(binary.BigEndian.Uint16(udph[0:2]))
+			if srcPort != ServerPort {
+				continue
+			}
+			dstPort := int(binary.BigEndian.Uint16(udph[2:4]))
+			if dstPort != ClientPort {
+				continue
+			}
+			pLen := int(binary.BigEndian.Uint16(udph[2:4]))
+			payload := buf[iph.Len+8 : iph.Len+pLen]
+			response, err = parse(payload)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if response.TransactionID != dhcp4.TransactionID {
+				continue
+			}
+			if response.OpCode != OpcodeBootReply {
+				continue
+			}
+			if messageType == MessageTypeNone {
+				break
+			}
+			if response.messageType() == messageType {
+				break
+			}
+		}
+		errs <- nil
+	}(recvErrors)
+
+	err = unix.SendTo(sfd, datagram, 0, &remoteAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case err = <- recvErrors:
+		if err == unix.EAGAIN {
+			return nil, errors.New("timed out while listening for replies")
+		}
+		if err != nil {
+			return nil, err
+		}
+	case <-time.After(NetworkTimeout):
+		return nil, errors.New("timed out while listening for replies")
+	}
+	return response, nil
+}
+
+
+func (dhcp4 *DHCPv4) Marshal() []uint8 {
+	// https://www.rfc-editor.org/rfc/rfc2131#page-37
+	buf := make([]uint8, 0, MinBootpLen)
+	buf = append(buf, dhcp4.OpCode)
+	buf = append(buf, uint8(dhcp4.HWType))
+	buf = append(buf, uint8(len(dhcp4.ClientHWAddr)))
+	buf = append(buf, uint8(NoHops))
+	buf = binary.BigEndian.AppendUint32(buf, dhcp4.TransactionID)
+	buf = binary.BigEndian.AppendUint16(buf, NoSecs)
+	buf = binary.BigEndian.AppendUint16(buf, NoFlags)
+	buf = binary.BigEndian.AppendUint32(buf, NoAddr)
+	buf = binary.BigEndian.AppendUint32(buf, NoAddr)
+	buf = binary.BigEndian.AppendUint32(buf, NoAddr)
+	buf = binary.BigEndian.AppendUint32(buf, NoAddr)
+	buf = append(buf, make([]uint8, 16)...)
+	copy(buf[len(buf)-16:], dhcp4.ClientHWAddr)
+	buf = append(buf, make([]uint8, 64)...)
+	buf = append(buf, make([]uint8, 128)...)
+	buf = append(buf, magicCookie[:]...)
+	buf = appendOptions(buf, dhcp4.Options)
+
+	if len(buf) < MinBootpLen {
+		buf = append(buf, bytes.Repeat([]uint8{OptionPad}, MinBootpLen-len(buf))...)
+	}
+
+	return buf
+}
+
+func appendOptions(buf []uint8, options map[uint8][]uint8) []uint8 {
+	var hasOptionAgentInfo, hasOptionEnd bool
+	var sortedOptions []int
+	for option := range options {
+		if option == OptionAgentInfo {
+			hasOptionAgentInfo = true
+			continue
+		}
+		if option == OptionEnd {
+			hasOptionEnd = true
+			continue
+		}
+		sortedOptions = append(sortedOptions, int(option))
+	}
+	sort.Ints(sortedOptions)
+	if hasOptionAgentInfo {
+		sortedOptions = append(sortedOptions, int(OptionAgentInfo))
+	}
+	if hasOptionEnd {
+		sortedOptions = append(sortedOptions, int(OptionEnd))
+	}
+
+	for _, option := range sortedOptions {
+		code := uint8(option)
+		if code == OptionEnd || code == OptionPad {
+			continue
+		}
+
+		data := options[code]
+
+		// Ensure even 0-length options are written out
+		if len(data) == 0 {
+			buf = append(buf, code)
+			buf = append(buf, 0)
+		}
+		// RFC 3396: If more than 256 bytes of data are given, the
+		// option is simply listed multiple times.
+		for len(data) > 0 {
+			buf = append(buf, code)
+			n := len(data)
+			if n > math.MaxUint8 {
+				n = math.MaxUint8
+			}
+			buf = append(buf, uint8(n))
+			buf = append(buf, data[:n]...)
+			data = data[n:]
+		}
+	}
+	return buf
+}
+
+func parse(buf []uint8) (*DHCPv4, error) {
+	var dhcp4 DHCPv4
+	return &dhcp4, nil
+}
+
 func htons(v uint16) uint16 {
-	var tmp [2]byte
+	var tmp [2]uint8
 	binary.BigEndian.PutUint16(tmp[:], v)
 	return binary.LittleEndian.Uint16(tmp[:])
 }
