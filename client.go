@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -20,14 +21,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// All parts of the DHCPv4 packet we use
+
+// Parts of the DHCPv4 packet required for address acquisition
 type DHCPv4 struct {
 	// https://www.rfc-editor.org/rfc/rfc2131#page-37
-	op        uint8 //opcode
-	htype     uint16 // hardware type
-	xid       uint32 // transaction id
-	yiaddr    net.IP // your address (from server)
-	chaddr    net.HardwareAddr // client hardware address
+	op        uint8 //opcode, included in all requests
+	htype     uint16 // hardware type, included in all requests
+	xid       uint32 // transaction id, included in all requests
+	yiaddr    net.IP // your address (from server), obtained from response and included in subsequent requests
+	chaddr    net.HardwareAddr // client hardware address, included in all requests
 	options   map[uint8][]uint8 // dhcp options, see https://www.rfc-editor.org/rfc/rfc2132
 }
 
@@ -96,6 +98,29 @@ const (
 )
 
 
+// Commandline flags
+var ifname = flag.String("dev", "lo", "What network device to send requests to")
+
+// Read commandline flags and perform a DORA sequence
+func main() {
+	log.SetFlags(0)
+	flag.Parse()
+	err := dora(*ifname)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// Perform a DORA sequence using the network device with name ifname
+// and package-global client- and server addresses:
+//
+// - send a discovery-request
+//
+// - listen for an offer-response
+//
+// - send a request-request
+//
+// - listen for an acknowledgement-response
 func dora(ifname string) error {
 	// Make send socket
 	sfd, err := unix.Socket(unix.AF_INET, unix.SOCK_RAW, unix.IPPROTO_RAW) // Raw IP packets
@@ -151,6 +176,7 @@ func dora(ifname string) error {
 
 	transactionID := rand.Uint32()
 
+
 	// Make discovery payload
 	discovery := DHCPv4{
 		op: OpcodeBootRequest,
@@ -163,6 +189,8 @@ func dora(ifname string) error {
 			OptionEnd: []uint8{},
 		},
 	}
+
+	log.Printf("discovery request %v", discovery)
 
 	offer, err := send(sfd, rfd, &discovery, MessageTypeDiscover)
 	if err != nil {
@@ -191,14 +219,17 @@ func dora(ifname string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(acknowledge.yiaddr)
+	log.Println(acknowledge.yiaddr)
 
 	return nil
 }
 
 
+// Make a raw IP datagram with dhcp4 as udp body and write it to the raw socket
+// sfd (send socket), then wait for responses arriving at the raw socket rfd
+// (receive socket). Returns a new DHCPv4 struct made from the response.
 func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
-	udpdata := dhcp4.Marshal()
+	udpdata := dhcp4.serialize()
 	udpheader := make([]uint8, 8)
 	binary.BigEndian.PutUint16(udpheader[:2], uint16(ClientPort))
 	binary.BigEndian.PutUint16(udpheader[2:4], uint16(ServerPort))
@@ -218,8 +249,8 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 	if err != nil {
 		return nil, err
 	}
-	datagram = append(datagram, udpheader)
-	datagram = append(datagram, udpdata)
+	datagram = append(datagram, udpheader...)
+	datagram = append(datagram, udpdata...)
 
 	var destination [net.IPv4len]uint8
 	copy(destination[:], ServerIP)
@@ -260,7 +291,7 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 			}
 			pLen := int(binary.BigEndian.Uint16(udph[4:6]))
 			payload := buf[iph.Len+8 : iph.Len+pLen]
-			response, err = parse(payload)
+			response, err = deserialize(payload)
 			if err != nil {
 				errs <- err
 				return
@@ -284,7 +315,7 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 		errs <- nil
 	}(recvErrors)
 
-	err = unix.SendTo(sfd, datagram, 0, &remoteAddr)
+	err = unix.Sendto(sfd, datagram, 0, &remoteAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -304,86 +335,8 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 }
 
 
-func (dhcp4 *DHCPv4) Marshal() []uint8 {
-	// https://www.rfc-editor.org/rfc/rfc2131#page-37
-	buf := make([]uint8, 0, MinDhcpLen)
-	buf = append(buf, dhcp4.op)
-	buf = append(buf, uint8(dhcp4.htype))
-	buf = append(buf, uint8(len(dhcp4.chaddr)))
-	buf = append(buf, uint8(NoHops))
-	buf = binary.BigEndian.AppendUint32(buf, dhcp4.xid)
-	buf = binary.BigEndian.AppendUint16(buf, NoSecs)
-	buf = binary.BigEndian.AppendUint16(buf, NoFlags)
-	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // ciaddr
-	buf = append(buf, dhcp4.yiaddr...) // yiaddr
-	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // siaddr
-	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // giaddr
-	buf = append(buf, make([]uint8, 16)...) // chaddr
-	copy(buf[len(buf)-16:], dhcp4.chaddr)
-	buf = append(buf, make([]uint8, 64)...) // sname
-	buf = append(buf, make([]uint8, 128)...) // file
-	buf = append(buf, DhcpMagic[:]...)
-	buf = appendOptions(buf, dhcp4.options)
-
-	if len(buf) < MinDhcpLen {
-		buf = append(buf, bytes.Repeat([]uint8{OptionPad}, MinDhcpLen-len(buf))...)
-	}
-
-	return buf
-}
-
-func appendOptions(buf []uint8, options map[uint8][]uint8) []uint8 {
-	var hasOptionAgentInfo, hasOptionEnd bool
-	var sortedOptions []int
-	for option := range options {
-		if option == OptionAgentInfo {
-			hasOptionAgentInfo = true
-			continue
-		}
-		if option == OptionEnd {
-			hasOptionEnd = true
-			continue
-		}
-		sortedOptions = append(sortedOptions, int(option))
-	}
-	sort.Ints(sortedOptions)
-	if hasOptionAgentInfo {
-		sortedOptions = append(sortedOptions, int(OptionAgentInfo))
-	}
-	if hasOptionEnd {
-		sortedOptions = append(sortedOptions, int(OptionEnd))
-	}
-
-	for _, option := range sortedOptions {
-		code := uint8(option)
-		if code == OptionEnd || code == OptionPad {
-			continue
-		}
-
-		data := options[code]
-
-		// Ensure even 0-length options are written out
-		if len(data) == 0 {
-			buf = append(buf, code)
-			buf = append(buf, 0)
-		}
-		// RFC 3396: If more than 256 bytes of data are given, the
-		// option is simply listed multiple times.
-		for len(data) > 0 {
-			buf = append(buf, code)
-			n := len(data)
-			if n > math.MaxUint8 {
-				n = math.MaxUint8
-			}
-			buf = append(buf, uint8(n))
-			buf = append(buf, data[:n]...)
-			data = data[n:]
-		}
-	}
-	return buf
-}
-
-func parse(buf []uint8) (*DHCPv4, error) {
+// Turns a raw udp body (buf) into a DHCPv4 struct.
+func deserialize(buf []uint8) (*DHCPv4, error) {
 	// https://www.rfc-editor.org/rfc/rfc2131#page-37
 	if len(buf) < 240 {
 		return nil, fmt.Errorf("malformed DHCP packet: size less than 240")
@@ -443,6 +396,91 @@ func parse(buf []uint8) (*DHCPv4, error) {
 	return &dhcp4, nil
 }
 
+
+// Turns a DHCPv4 struct into a raw udp body
+func (dhcp4 *DHCPv4) serialize() []uint8 {
+	// https://www.rfc-editor.org/rfc/rfc2131#page-37
+	buf := make([]uint8, 0, MinDhcpLen)
+	buf = append(buf, dhcp4.op)
+	buf = append(buf, uint8(dhcp4.htype))
+	buf = append(buf, uint8(len(dhcp4.chaddr)))
+	buf = append(buf, uint8(NoHops))
+	buf = binary.BigEndian.AppendUint32(buf, dhcp4.xid)
+	buf = binary.BigEndian.AppendUint16(buf, NoSecs)
+	buf = binary.BigEndian.AppendUint16(buf, NoFlags)
+	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // ciaddr
+	buf = append(buf, dhcp4.yiaddr...) // yiaddr
+	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // siaddr
+	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // giaddr
+	buf = append(buf, make([]uint8, 16)...) // chaddr
+	copy(buf[len(buf)-16:], dhcp4.chaddr)
+	buf = append(buf, make([]uint8, 64)...) // sname
+	buf = append(buf, make([]uint8, 128)...) // file
+	buf = append(buf, DhcpMagic[:]...)
+	buf = appendOptions(buf, dhcp4.options)
+
+	if len(buf) < MinDhcpLen {
+		buf = append(buf, bytes.Repeat([]uint8{OptionPad}, MinDhcpLen-len(buf))...)
+	}
+
+	return buf
+}
+
+
+// Turns a DHCPv4.Options map to a raw dhcp options list and append to buf
+func appendOptions(buf []uint8, options map[uint8][]uint8) []uint8 {
+	var hasOptionAgentInfo, hasOptionEnd bool
+	var sortedOptions []int
+	for option := range options {
+		if option == OptionAgentInfo {
+			hasOptionAgentInfo = true
+			continue
+		}
+		if option == OptionEnd {
+			hasOptionEnd = true
+			continue
+		}
+		sortedOptions = append(sortedOptions, int(option))
+	}
+	sort.Ints(sortedOptions)
+	if hasOptionAgentInfo {
+		sortedOptions = append(sortedOptions, int(OptionAgentInfo))
+	}
+	if hasOptionEnd {
+		sortedOptions = append(sortedOptions, int(OptionEnd))
+	}
+
+	for _, option := range sortedOptions {
+		code := uint8(option)
+		if code == OptionEnd || code == OptionPad {
+			continue
+		}
+
+		data := options[code]
+
+		// Ensure even 0-length options are written out
+		if len(data) == 0 {
+			buf = append(buf, code)
+			buf = append(buf, 0)
+		}
+		// RFC 3396: If more than 256 bytes of data are given, the
+		// option is simply listed multiple times.
+		for len(data) > 0 {
+			buf = append(buf, code)
+			n := len(data)
+			if n > math.MaxUint8 {
+				n = math.MaxUint8
+			}
+			buf = append(buf, uint8(n))
+			buf = append(buf, data[:n]...)
+			data = data[n:]
+		}
+	}
+	return buf
+}
+
+
+// Host to network byte order
 func htons(v uint16) uint16 {
 	var tmp [2]uint8
 	binary.BigEndian.PutUint16(tmp[:], v)
