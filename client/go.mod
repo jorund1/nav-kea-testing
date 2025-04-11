@@ -1,4 +1,4 @@
-module github.com/jorund1/nav-kea-testing
+module jorund1/dora
 
 go 1.20
 

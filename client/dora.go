@@ -190,12 +190,13 @@ func dora(ifname string) error {
 		},
 	}
 
-	log.Printf("discovery request %v", discovery)
-
+	log.Printf("discovery request")
 	offer, err := send(sfd, rfd, &discovery, MessageTypeDiscover)
 	if err != nil {
 		return err
 	}
+	log.Printf("offer response")
+
 
 	// Make request payload
 	request := DHCPv4{
@@ -215,10 +216,12 @@ func dora(ifname string) error {
 		request.options[OptionServerIdentifier] = []uint8{serverIP[0], serverIP[1],  serverIP[2], serverIP[3]}
 	}
 
+	log.Printf("request request")
 	acknowledge, err := send(sfd, rfd, &request, MessageTypeRequest)
 	if err != nil {
 		return err
 	}
+	log.Printf("acknowledge response")
 	log.Println(acknowledge.yiaddr)
 
 	return nil

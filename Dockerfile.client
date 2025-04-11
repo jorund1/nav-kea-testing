@@ -1,15 +1,28 @@
 FROM alpine:3.21
+
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 RUN apk update && \
-    apk add --no-cache dhcpcd supervisor && \
+    apk add --no-cache dhcpcd supervisor go && \
     mkdir -p /var/log/supervisor && \
     mkdir -p /run
 
 # Copy supervisor configs
 COPY etc/supervisord.conf /etc/supervisor/supervisord.conf
 
-# Copy bin scripts
-COPY bin/dhcpcd-run /bin/dhcpcd-run
+# Build dhcp client (start)
+WORKDIR /usr/local/src/client
+
+# fetch dependencies...
+COPY client/go.sum client/go.mod ./
+RUN go mod download
+
+# build...
+COPY client/ ./
+RUN go build && \
+    mv dora /bin/dora 
+
+# Build dhcp client (end)
+WORKDIR /
 
 CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 HEALTHCHECK CMD [ "supervisorctl", "status" ]
