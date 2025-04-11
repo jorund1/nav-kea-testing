@@ -22,12 +22,13 @@ import (
 
 // All parts of the DHCPv4 packet we use
 type DHCPv4 struct {
-	OpCode         uint8
-	HWType         uint16
-	TransactionID  uint32
-	YourIPAddr     net.IP
-	ClientHWAddr   net.HardwareAddr
-	Options        map[uint8][]uint8
+	// https://www.rfc-editor.org/rfc/rfc2131#page-37
+	op        uint8 //opcode
+	htype     uint16 // hardware type
+	xid       uint32 // transaction id
+	yiaddr    net.IP // your address (from server)
+	chaddr    net.HardwareAddr // client hardware address
+	options   map[uint8][]uint8 // dhcp options, see https://www.rfc-editor.org/rfc/rfc2132
 }
 
 
@@ -152,11 +153,11 @@ func dora(ifname string) error {
 
 	// Make discovery payload
 	discovery := DHCPv4{
-		OpCode: OpcodeBootRequest,
-		HWType: HWTypeEthernet,
-		TransactionID: transactionID,
-		ClientHWAddr: iface.HardwareAddr,
-		Options: map[uint8][]uint8{
+		op: OpcodeBootRequest,
+		htype: HWTypeEthernet,
+		xid: transactionID,
+		chaddr: iface.HardwareAddr,
+		options: map[uint8][]uint8{
 			OptionDHCPMessageType: []uint8{MessageTypeDiscover},
 			OptionParameterRequestList: []uint8{OptionDomainName},
 			OptionEnd: []uint8{},
@@ -170,27 +171,27 @@ func dora(ifname string) error {
 
 	// Make request payload
 	request := DHCPv4{
-		OpCode: OpcodeBootRequest,
-		HWType: HWTypeEthernet,
-		TransactionID: transactionID,
-		ClientHWAddr: iface.HardwareAddr,
-		Options: map[uint8][]uint8{
+		op: OpcodeBootRequest,
+		htype: HWTypeEthernet,
+		xid: transactionID,
+		chaddr: iface.HardwareAddr,
+		options: map[uint8][]uint8{
 			OptionDHCPMessageType: []uint8{MessageTypeDiscover},
 			OptionParameterRequestList: []uint8{OptionDomainName},
-			OptionRequestedIPAddress: []uint8{offer.YourIPAddr[0], offer.YourIPAddr[1], offer.YourIPAddr[2], offer.YourIPAddr[3]},
+			OptionRequestedIPAddress: []uint8{offer.yiaddr[0], offer.yiaddr[1], offer.yiaddr[2], offer.yiaddr[3]},
 		},
 	}
 
-	serverIP := offer.Options[OptionServerIdentifier]
+	serverIP := offer.options[OptionServerIdentifier]
 	if serverIP != nil {
-		request.Options[OptionServerIdentifier] = []uint8{serverIP[0], serverIP[1],  serverIP[2], serverIP[3]}
+		request.options[OptionServerIdentifier] = []uint8{serverIP[0], serverIP[1],  serverIP[2], serverIP[3]}
 	}
 
 	acknowledge, err := send(sfd, rfd, &request, MessageTypeRequest)
 	if err != nil {
 		return err
 	}
-	fmt.Println(acknowledge.YourIPAddr)
+	fmt.Println(acknowledge.yiaddr)
 
 	return nil
 }
@@ -264,19 +265,19 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 				errs <- err
 				return
 			}
-			if response.TransactionID != dhcp4.TransactionID {
+			if response.xid != dhcp4.xid {
 				continue
 			}
-			if response.OpCode != OpcodeBootReply {
+			if response.op != OpcodeBootReply {
 				continue
 			}
 			if messageType == MessageTypeNone {
 				break
 			}
-			if len(response.Options[OptionDHCPMessageType]) != 1 {
+			if len(response.options[OptionDHCPMessageType]) != 1 {
 				fmt.Errorf("malformed DHCP packet: invalid message type")
 			}
-			if response.Options[OptionDHCPMessageType][0] == messageType {
+			if response.options[OptionDHCPMessageType][0] == messageType {
 				break
 			}
 		}
@@ -306,23 +307,23 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 func (dhcp4 *DHCPv4) Marshal() []uint8 {
 	// https://www.rfc-editor.org/rfc/rfc2131#page-37
 	buf := make([]uint8, 0, MinDhcpLen)
-	buf = append(buf, dhcp4.OpCode)
-	buf = append(buf, uint8(dhcp4.HWType))
-	buf = append(buf, uint8(len(dhcp4.ClientHWAddr)))
+	buf = append(buf, dhcp4.op)
+	buf = append(buf, uint8(dhcp4.htype))
+	buf = append(buf, uint8(len(dhcp4.chaddr)))
 	buf = append(buf, uint8(NoHops))
-	buf = binary.BigEndian.AppendUint32(buf, dhcp4.TransactionID)
+	buf = binary.BigEndian.AppendUint32(buf, dhcp4.xid)
 	buf = binary.BigEndian.AppendUint16(buf, NoSecs)
 	buf = binary.BigEndian.AppendUint16(buf, NoFlags)
 	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // ciaddr
-	buf = append(buf, dhcp4.YourIPAddr...) // yiaddr
+	buf = append(buf, dhcp4.yiaddr...) // yiaddr
 	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // siaddr
 	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // giaddr
 	buf = append(buf, make([]uint8, 16)...) // chaddr
-	copy(buf[len(buf)-16:], dhcp4.ClientHWAddr)
+	copy(buf[len(buf)-16:], dhcp4.chaddr)
 	buf = append(buf, make([]uint8, 64)...) // sname
 	buf = append(buf, make([]uint8, 128)...) // file
 	buf = append(buf, DhcpMagic[:]...)
-	buf = appendOptions(buf, dhcp4.Options)
+	buf = appendOptions(buf, dhcp4.options)
 
 	if len(buf) < MinDhcpLen {
 		buf = append(buf, bytes.Repeat([]uint8{OptionPad}, MinDhcpLen-len(buf))...)
@@ -388,24 +389,24 @@ func parse(buf []uint8) (*DHCPv4, error) {
 		return nil, fmt.Errorf("malformed DHCP packet: size less than 240")
 	}
 	var dhcp4 DHCPv4
-	dhcp4.OpCode = buf[0]
-	dhcp4.HWType = uint16(buf[1])
+	dhcp4.op = buf[0]
+	dhcp4.htype = uint16(buf[1])
 	hwAddrLen := buf[2]
 	// hops = buf[3] (skip)
-	dhcp4.TransactionID = binary.BigEndian.Uint32(buf[4:8])
+	dhcp4.xid = binary.BigEndian.Uint32(buf[4:8])
 	// secs = binary.BigEndian.Uint16(buf[8:10]) (skip)
 	// flags = binary.BigEndian.Uint16(buf[10:12]) (skip)
 	// ciaddr = copy(buf[12:16]) (skip)
-	dhcp4.YourIPAddr = []uint8{buf[16], buf[17], buf[18], buf[19]}
+	dhcp4.yiaddr = []uint8{buf[16], buf[17], buf[18], buf[19]}
 	// siaddr = copy(buf[20:24]) (skip)
 	// giaddr = copy(buf[24:28]) (skip)
 
 	if hwAddrLen > 16 {
 		hwAddrLen = 16
 	}
-	dhcp4.ClientHWAddr = make(net.HardwareAddr, 16)
-	copy(dhcp4.ClientHWAddr, buf[28:44])
-	dhcp4.ClientHWAddr = dhcp4.ClientHWAddr[:hwAddrLen]
+	dhcp4.chaddr = make(net.HardwareAddr, 16)
+	copy(dhcp4.chaddr, buf[28:44])
+	dhcp4.chaddr = dhcp4.chaddr[:hwAddrLen]
 
 	// sname = copy(buf[44:108]) (skip)
 	// file = copy(buf[108:236]) (skip)
@@ -416,7 +417,7 @@ func parse(buf []uint8) (*DHCPv4, error) {
 		return nil, fmt.Errorf("malformed DHCP packet: got magic cookie %v, want %v", magic[:], DhcpMagic[:])
 	}
 
-	dhcp4.Options = make(map[uint8][]uint8)
+	dhcp4.options = make(map[uint8][]uint8)
 	optionsbuf := buf[240:]
 	end := false
 	for len(optionsbuf) >= 1 {
@@ -432,7 +433,7 @@ func parse(buf []uint8) (*DHCPv4, error) {
 		if len(optionsbuf) < length {
 			return nil, fmt.Errorf("malformed DHCP packet: bad option length")
 		}
-		dhcp4.Options[code] = append(dhcp4.Options[code], optionsbuf[:length:length]...)
+		dhcp4.options[code] = append(dhcp4.options[code], optionsbuf[:length:length]...)
 		optionsbuf = optionsbuf[length:]
 	}
 	if !end {
