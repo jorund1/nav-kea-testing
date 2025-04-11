@@ -182,6 +182,7 @@ func dora(ifname string) error {
 		op: OpcodeBootRequest,
 		htype: HWTypeEthernet,
 		xid: transactionID,
+		yiaddr: net.IPv4zero,
 		chaddr: iface.HardwareAddr,
 		options: map[uint8][]uint8{
 			OptionDHCPMessageType: []uint8{MessageTypeDiscover},
@@ -203,6 +204,7 @@ func dora(ifname string) error {
 		op: OpcodeBootRequest,
 		htype: HWTypeEthernet,
 		xid: transactionID,
+		yiaddr: net.IPv4zero,
 		chaddr: iface.HardwareAddr,
 		options: map[uint8][]uint8{
 			OptionDHCPMessageType: []uint8{MessageTypeDiscover},
@@ -232,6 +234,7 @@ func dora(ifname string) error {
 // sfd (send socket), then wait for responses arriving at the raw socket rfd
 // (receive socket). Returns a new DHCPv4 struct made from the response.
 func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
+	log.Printf("send()")
 	udpdata := dhcp4.serialize()
 	udpheader := make([]uint8, 8)
 	binary.BigEndian.PutUint16(udpheader[:2], uint16(ClientPort))
@@ -270,50 +273,74 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 		}
 		for {
 			buf := make([]uint8, MaxUdpLen)
+			log.Printf("(1) Listening from %v\n", remoteAddr)
 			n, _, innerErr := unix.Recvfrom(rfd, buf, 0)
 			if innerErr != nil {
 				errs <- innerErr
 				return
 			}
+			log.Printf("(2) Listening from %v\n", remoteAddr)
 			var iph ipv4.Header
 			err := iph.Parse(buf[:n])
 			if err != nil {
 				continue
 			}
+			log.Printf("(3) Listening from %v\n", remoteAddr)
 			if iph.Protocol != ProtocolUdp {
 				continue
 			}
+			log.Printf("(4) Listening from %v\n", remoteAddr)
 			udph := buf[iph.Len:n]
 			srcPort := int(binary.BigEndian.Uint16(udph[0:2]))
+			_pLen := int(binary.BigEndian.Uint16(udph[4:6]))
+			_payload := buf[iph.Len+8 : iph.Len+_pLen]
+			log.Printf("(4) srcPort: %v, ServerPort: %v, pLen: %v\n", srcPort, ServerPort, _pLen)
+			_response, err := deserialize(_payload)
+			log.Printf("(4) srcPort: %v, ServerPort: %v, pLen: %v\n", srcPort, ServerPort, _pLen)
+			if err != nil {
+				log.Printf("Unexpected")
+				errs <- err
+				return
+			}
+			log.Printf("(4) opcode: %v\n", _response.op)
 			if srcPort != ServerPort {
 				continue
 			}
+			log.Printf("(5) Listening from %v\n", remoteAddr)
 			dstPort := int(binary.BigEndian.Uint16(udph[2:4]))
 			if dstPort != ClientPort {
 				continue
 			}
+			log.Printf("(6) Listening from %v\n", remoteAddr)
 			pLen := int(binary.BigEndian.Uint16(udph[4:6]))
 			payload := buf[iph.Len+8 : iph.Len+pLen]
+			log.Println("Received some data")
 			response, err = deserialize(payload)
 			if err != nil {
 				errs <- err
 				return
 			}
+			log.Printf("(7) Listening from %v\n", remoteAddr)
 			if response.xid != dhcp4.xid {
 				continue
 			}
+			log.Printf("(8) Listening from %v\n", remoteAddr)
 			if response.op != OpcodeBootReply {
 				continue
 			}
+			log.Printf("(9) Listening from %v\n", remoteAddr)
 			if messageType == MessageTypeNone {
 				break
 			}
+			log.Printf("(10) Listening from %v\n", remoteAddr)
 			if len(response.options[OptionDHCPMessageType]) != 1 {
 				fmt.Errorf("malformed DHCP packet: invalid message type")
 			}
+			log.Printf("(11) Listening from %v\n", remoteAddr)
 			if response.options[OptionDHCPMessageType][0] == messageType {
 				break
 			}
+			log.Printf("(12) Listening from %v\n", remoteAddr)
 		}
 		errs <- nil
 	}(recvErrors)
@@ -340,6 +367,7 @@ func send(sfd int, rfd int, dhcp4 *DHCPv4, messageType uint8) (*DHCPv4, error) {
 
 // Turns a raw udp body (buf) into a DHCPv4 struct.
 func deserialize(buf []uint8) (*DHCPv4, error) {
+	log.Println(buf)
 	// https://www.rfc-editor.org/rfc/rfc2131#page-37
 	if len(buf) < 240 {
 		return nil, fmt.Errorf("malformed DHCP packet: size less than 240")
@@ -348,6 +376,7 @@ func deserialize(buf []uint8) (*DHCPv4, error) {
 	dhcp4.op = buf[0]
 	dhcp4.htype = uint16(buf[1])
 	hwAddrLen := buf[2]
+	log.Printf("(1) Deserialize")
 	// hops = buf[3] (skip)
 	dhcp4.xid = binary.BigEndian.Uint32(buf[4:8])
 	// secs = binary.BigEndian.Uint16(buf[8:10]) (skip)
@@ -367,12 +396,15 @@ func deserialize(buf []uint8) (*DHCPv4, error) {
 	// sname = copy(buf[44:108]) (skip)
 	// file = copy(buf[108:236]) (skip)
 
+	log.Printf("(2) Deserialize")
 	var magic [4]byte
 	copy(magic[:], buf[236:240])
 	if magic != DhcpMagic {
+		log.Printf("(3) Deserialize")
 		return nil, fmt.Errorf("malformed DHCP packet: got magic cookie %v, want %v", magic[:], DhcpMagic[:])
 	}
 
+	log.Printf("(4) Deserialize")
 	dhcp4.options = make(map[uint8][]uint8)
 	optionsbuf := buf[240:]
 	end := false
@@ -412,7 +444,10 @@ func (dhcp4 *DHCPv4) serialize() []uint8 {
 	buf = binary.BigEndian.AppendUint16(buf, NoSecs)
 	buf = binary.BigEndian.AppendUint16(buf, NoFlags)
 	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // ciaddr
-	buf = append(buf, dhcp4.yiaddr...) // yiaddr
+	buf = append(buf, make([]uint8, 4)...) // yiaddr
+	ip := dhcp4.yiaddr.To4()
+	log.Println(ip)
+	copy(buf[len(buf)-4:], ip[:4])
 	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // siaddr
 	buf = binary.BigEndian.AppendUint32(buf, NoAddr) // giaddr
 	buf = append(buf, make([]uint8, 16)...) // chaddr
@@ -422,10 +457,12 @@ func (dhcp4 *DHCPv4) serialize() []uint8 {
 	buf = append(buf, DhcpMagic[:]...)
 	buf = appendOptions(buf, dhcp4.options)
 
+
 	if len(buf) < MinDhcpLen {
 		buf = append(buf, bytes.Repeat([]uint8{OptionPad}, MinDhcpLen-len(buf))...)
 	}
 
+	log.Println(buf)
 	return buf
 }
 
