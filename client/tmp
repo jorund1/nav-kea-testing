@@ -57,16 +57,9 @@ func main() {
 	log.SetFlags(0)
 	flag.Parse()
 	client := NewClient()
-	conversation, err := client.Exchange(*ifname)
+	err := client.Exchange(*ifname)
 	if err != nil {
 		log.Fatal(err)
-	}
-	for _, response := range conversation {
-		if response.Options.Get(dhcpv4.OptionDHCPMessageType)[0] == byte(dhcpv4.MessageTypeOffer) {
-			log.Printf("Got offered %v \n", response.YourIPAddr)
-		} else if response.Options.Get(dhcpv4.OptionDHCPMessageType)[0] == byte(dhcpv4.MessageTypeAck) {
-			log.Printf("Request for %v acknowledged\n", response.YourIPAddr)
-		}
 	}
 }
 

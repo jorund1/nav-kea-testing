@@ -2,26 +2,45 @@
 
 help() {
     echo "\
-Usage: $0 {1, 2, ..., 5}...
-Make NAV collect \$1 assigned addresses with timestamp t, \$2 assigned addresses
-with timestamp t+5min, \$3 assigned addresses with timestamp t+10min, ..., where
-t is the current time and \$N denotes the Nth positional argument.\
+Usage: $0 navdir statlist...
+
+Description:
+  simulate acquisition and release of dhcp leases from a kea dhcp server,
+  and statistics collection by nav.
+
+Arguments:
+  navdir is the path to the project directory of your local NAV codebase.
+
+  statlist is a list of numbers between 1 and 5 (inclusive) and specifies
+  the lease history of the dhcp server. The list 
+
+    1 4 2
+
+  specifies that at minute 0, one address is leased, at minute 5, four addresses
+  are leased, and at minute 10, two addresses are leased from the dhcp server.
 " >&2
+}
+
+inform() {
+    echo -e "\033[36;1m$@\033[0m" >&2
 }
 
 
 reset_dhcp() {
     # Reset lease table of DHCP server and then acquire $1 leases
+    inform "kea: reseting lease table"
     sudo docker compose exec kea clear-leases || exit 1
     for i in $(seq 1 "$1"); do
-        sudo docker compose exec "client$i" dhcpcd-run || exit 1
+        inform "client$i: requesting lease"
+        sudo docker compose exec "client$i" dora -dev eth0 || exit 1
     done
 }
 
 
 collect_dhcp() {
     # Make NAV collect metrics from DHCP server
-    sudo docker compose exec sh -c "TZ=\"$tz\" nav dhcpmetrics" || exit 1
+    inform "nav: collecting metrics"
+    sudo docker compose --project-directory="$NAVDIR" exec nav bash -c "TZ=\"$tz\" navexternalstats" || exit 1
 }
 
 
@@ -33,9 +52,17 @@ timestamp() {
 }
 
 
-if test "$#" -eq 0; then
+if test "$#" -le 1; then
     help
     exit 1
+fi
+
+NAVDIR="$1"
+shift
+
+if ! test -d "$NAVDIR"; then
+  help
+  exit 1
 fi
 
 for arg in "$@"; do
@@ -57,5 +84,6 @@ while test "$#" -gt 0; do
     minutes=$((timeoffset % 3600 / 60))
     seconds=$((timeoffset % 60))
     tz="CUSTOM+$hours:$minutes:$seconds"
+    inform "<<<travelling to $hours hours, $minutes minutes, $seconds seconds backwards in time<<<"
     shift 1
 done
