@@ -2,7 +2,7 @@ FROM alpine:3.21
 
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 RUN apk update && \
-    apk add --no-cache dhcpcd supervisor go && \
+    apk add --no-cache dhcpcd supervisor go curl && \
     mkdir -p /var/log/supervisor && \
     mkdir -p /run
 

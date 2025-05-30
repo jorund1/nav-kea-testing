@@ -11,18 +11,55 @@ mkdir -p /etc/kea
 cat <<EOF > /etc/kea/kea-dhcp4.conf
 {
     "Dhcp4": {
-        "subnet4": [
-            {
-                "subnet":  "172.31.255.0/24",
-                "pools": [
-                    {
-                        "pool": "172.31.255.0/25"
-                    }
-                ],
-                "id": 1,
-                "interface": "$iface"
-            }
-        ],
+"subnet4": [
+                {
+                    "id": 1,
+                    "subnet": "192.0.1.0/24",
+                    "pools": [{"pool": "192.0.1.1-192.0.1.10", "pool-id": 1}]
+                },
+                {
+                    "id": 2,
+                    "subnet": "192.0.2.0/24",
+                    "pools": [
+                        {"pool": "192.0.2.1-192.0.2.10", "pool-id": 1},
+                        {"pool": "192.0.2.128/25", "pool-id": 2},
+                        {"pool": "192.0.2.32/28", "pool-id": 3}
+                    ]
+                }
+            ],
+            "shared-networks": [
+                {
+                    "name": "shared-network-1",
+                    "subnet4": [
+                        {
+                            "id": 3,
+                            "subnet": "192.0.3.0/24",
+                            "pools": [
+                                {"pool": "192.0.3.1-192.0.3.10", "pool-id": 1}
+                            ]
+                        },
+                        {
+                            "id": 4,
+                            "subnet": "192.0.4.1/24",
+                            "pools": [
+                                {"pool": "192.0.4.1-192.0.4.5", "pool-id": 1}
+                            ]
+                        }
+                    ],
+                },
+                {
+                    "name": "shared-network-2",
+                    "subnet4": [
+                        {
+                            "id": 5,
+                            "subnet": "192.0.5.0/24",
+                            "pools": [
+                                {"pool": "192.0.5.1-192.0.5.5", "pool-id": 1}
+                            ]
+                        }
+                    ]
+                }
+            ],
         "interfaces-config": {
             "interfaces": [
                 "$iface"
