@@ -9,6 +9,7 @@ iface="$(ip -o -4 route show to "172.31.255.0/24" | cut -d' ' -f3 -)"
 
 mkdir -p /etc/kea
 cat <<EOF > /etc/kea/kea-dhcp4.conf
+
 {
     "Dhcp4": {
         "subnet4": [
@@ -16,7 +17,18 @@ cat <<EOF > /etc/kea/kea-dhcp4.conf
                 "subnet":  "172.31.255.0/24",
                 "pools": [
                     {
-                        "pool": "172.31.255.0/25"
+                        "pool-id": 1,
+                        "pool": "172.31.255.0/26",
+                        "user-context": {
+                            "name": "second floor",
+                        }
+                    },
+                    {
+                        "pool": "172.31.255.64/26",
+                        "pool-id": 2,
+                        "user-context": {
+                            "name": "second floor",
+                        }
                     }
                 ],
                 "id": 1,
